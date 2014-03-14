@@ -1,23 +1,4 @@
 '''
-some parameters:
-    context window size
-    colocational size
-
-
-the simplest thing to do:
-    look at the full context for all examples of each sense
-    simply count the number of all words
-
-    word:
-        sense1 (p-o-s):
-            features, occurrences
-        sense2 (p-o-s): 
-            features, occurrences
-
-        features:
-            raw counts of words in total context
-
-
 ~~~
 the biggest problem is:
     dealing with the potentially large number of features we want to specify
@@ -27,6 +8,13 @@ maybe we could key a dictionary by features and take the union, adding 1 to ever
 
 things we need to store:
     (f_i | s) for all f_i, for both (?) s
+'''
+
+'''
+another biggest problem:
+    we have 758 examples for sense 1 of president and 15 examples for sense 2!
+
+
 '''
 
 
@@ -54,7 +42,7 @@ class_word:
 import re
 
 #constants
-TRAINING_PATH = '/Users/georgeberry/Google Drive/Spring 2014/CS5740/proj2/training_data.data'
+TRAINING_PATH = '/Users/g/Google Drive/Spring 2014/CS5740/nlp2/training_data.data'
 
 #global functions
 def split_up():
@@ -69,8 +57,6 @@ def split_up():
             contexts.append(s)
 
     return contexts
-
-
 
 
 #classes
@@ -91,13 +77,21 @@ class Classifier:
             #print self.classifiers
             #print example_as_list
 
-            self.classifiers[current_lemma].__call__(*example_as_list)
+            self.classifiers[current_lemma].add_to(*example_as_list)
 
     def __call__(self, example_as_list):
         '''
         this should do classification for the input word and context
         '''
         pass
+
+    def __getitem__(self, key):
+        #call this shit like a dictionary!
+        return self.classifiers[key]
+
+    def __repr__(self):
+        l = len(self.classifiers.keys())
+        return 'Classifier instance containing {} words'.format(l)
 
 
 class Word:
@@ -109,7 +103,7 @@ class Word:
         self.window = window
         self.lemma = None
 
-    def __call__(self, lemma_and_pos, sense, context):
+    def add_to(self, lemma_and_pos, sense, context):
         
         #first call sets the lemma for the class
         if self.lemma == None:
@@ -123,8 +117,18 @@ class Word:
         
         self.senses[sense].add_example(lemma_and_pos, sense, context)
 
-    def compare():
-        pass
+    def compare(self):
+        #add 1 smoothing
+        f = set()
+        for sense in self.senses.values():
+            f = f | set(sense.features.keys())
+
+        for sense in self.senses.values():
+            sense.add_one(list(f))
+
+    def __getitem__(self, key):
+        #call this shit like a dictionary!
+        return self.senses[key].features
 
     def __repr__(self):
         return 'word class instance for "{}"'.format(self.lemma)
@@ -136,24 +140,28 @@ class Sense:
 
     feature counting and whatnot is done here in the add_example function
         just need to edit one place to add more features!
+
+    todo:
+    get rid of stopwords?
+    do some tf-idf?
+    just count the number of numeric words rather than individual word?
+
     '''
     def __init__(self, window):
         self.count = 0
         self.features = {}
         self.window = window
 
-
     def add_example(self, lemma_and_pos, sense, context):
+        '''
+        this is where naive bayes features happen
+        '''
 
+        #increment how many times we've seen this count
+        self.count += 1
+
+        #split up the context
         before, target, after = re.split(r'\s*%%\s*', context)
-
-        #except ValueError:
-        #    print re.split(r'\s*%%\s*', context)
-        #if len(s) == 2:
-
-        #elif len(s) == 3:
-        #    before, target, after = s
-
 
         before = re.split(r' +', before)
         after = re.split(r' +', after)
@@ -161,10 +169,10 @@ class Sense:
         #assuming here that both before and after can't be zero length strings
         #in that case there'd be no context
         if len(before) == 1 and before[0] == '':
-            del before
+            before = []
             context = after
         elif len(after) == 1 and after[0] =='':
-            del after
+            after = []
             context = before
         else:
             context = before + after
@@ -184,7 +192,7 @@ class Sense:
                 if prev_w not in self.features:
                     self.features[prev_w] = 0
                 self.features[prev_w] += 1
-            except (IndexError, UnboundLocalError):
+            except IndexError:
                 #index error handles cases where target word occurs near beginnign or end of sentence
                 continue
 
@@ -193,20 +201,23 @@ class Sense:
                 if post_w not in self.features:
                     self.features[post_w] = 0
                 self.features[post_w] += 1
-            except (IndexError, UnboundLocalError):
+            except IndexError:
                 continue
+
+    def add_one(self, complete_feature_list):
+        #Word class looks at all senses and returns a list of all features
+        #this function adds 1 to all features, including ones we haven't seen for this sense
+        #this avoids the multiplication-by-zero problem
+
+        for feature in complete_feature_list:
+            if feature not in self.features:
+                self.features[feature] = 0
+            self.features[feature] += 1
+
+    def __getitem__(self, key):
+        #call this shit like a dictionary!
+        return self.features[key]
 
     def __repr__(self):
         return str(self.features)
-
-
-        #get rid of stopwords?
-        #to some tf-idf?
-
-
-
-
-
-
-
 
