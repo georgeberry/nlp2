@@ -1,0 +1,6 @@
+*.pyc
+*.pdf
+*.txt
+*.xml
+*.data
+.DS_Store
