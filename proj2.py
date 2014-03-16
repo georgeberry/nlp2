@@ -1,42 +1,20 @@
-from __future__ import division
-
 '''
-~~~
-the biggest problem is:
-    dealing with the potentially large number of features we want to specify
+~~USE PYTHON 3~~
 
-what if we see one feature many times for sense 1 but zero times for sense 2?
-maybe we could key a dictionary by features and take the union, adding 1 to everything?
+real problem: priors for different features
 
-things we need to store:
-    (f_i | s) for all f_i, for both (?) s
-'''
+we're doing the following type of smoothing:
 
-'''
-another biggest problem:
-    we have 758 examples for sense 1 of president and 15 examples for sense 2!
+n_c + pm
+--------
+ n + m
 
+n_c is the number of times we've seen the feature given a class
+n is the nubmer of times we've seen the class
+p is the prior for seeing the feature across all classes
+m is the number of increments we want
 
-'''
-
-
-'''
-ok so we're going really OO again
-    sorry
-
-we have a 'word' class that:
-    1) stores information on word senses
-    2) given a test example, returns a classification
-
-then, inside the 'word' class we have a 'sense' class that:
-    1) stores detailed information on one word sense
-    2) turns raw context into features
-    3) returns probabilities for specific elements of a test example
-
-
-class_word:
-    class_sense: sense1
-    class_sense: sense2
+if p = 1/V and m = V, this reduces to laplacian smoothing
 
 '''
 
@@ -55,12 +33,15 @@ KAGGLE_PATH = '/Users/georgeberry/Google Drive/Spring 2014/CS5740/nlp2/kaggle_ou
 
 #global functions
 def split_up(path):
+    '''
+    straightfoward: returns a list of lists of the 3 parts of the test data
+    '''
     contexts = []
 
     with open(path) as f:
         for line in f.readlines():
             s = line.strip('\n').split('|')
-            s = map(str.strip, s)
+            s = list(map(str.strip, s))
             #s[2] = s[2].split()
 
             contexts.append(s)
@@ -68,6 +49,9 @@ def split_up(path):
     return contexts
 
 def timer(f):
+    '''
+    timer decorator
+    '''
     @wraps(f)
     def wrapper(*args,**kwargs):
         tic = time.time()
@@ -76,40 +60,50 @@ def timer(f):
         return result
     return wrapper
 
-#to compare with Classifier output
+
 def get_valid_senses(valid_data):
+    '''
+    looks through validation data
+    pulls out correct senses in order
+    '''
     v = []
     for example in valid_data:
         v.append(example[1])
-    return map(int, v)
-
+    return list(map(int, v))
 
 def correct(output, valid):
-
+    '''
+    give your output and validation correct answers
+    returns info about how many you got right
+    '''
     if len(output) == len(valid):
         incorrect = 0
 
-        for num in xrange(len(output)):
+        for num in range(len(output)):
             if output[num] != valid[num]:
                 incorrect += 1
-                print 'num {} actually {}, assigned {}'.format(num+1, valid[num], output[num])
+                print('num {} actually {}, assigned {}'.format(num+1, valid[num], output[num]))
 
-        print '{} share correct'.format(1 - incorrect/len(output))
-        print 'that\'s {} out of {}'.format(len(output) - incorrect, len(output))
+        print('{} share correct'.format(1 - incorrect/len(output)))
+        print('that\'s {} out of {}'.format(len(output) - incorrect, len(output)))
 
     else:
-        print 'different number of classified instances'
+        print('different number of classified instances')
 
 
 def kaggle_output(filepath, output):
+    '''
+    outputs to format kaggle wants
+    '''
     with open(filepath, 'w') as f:
         for line in output:
             f.write(str(line) + '\n')
 
 
-def make_features(lemma_and_pos, sense, context, feature_dict, window):
+def word_features(lemma_and_pos, sense, context, feature_dict, window):
     '''
-    this is where naive bayes features happen
+    word features happen here:
+        these are defined by anything that can be smoothed by laplacian smoothing
 
     called in both Sense and Word classes, so it's kept as a global function
 
@@ -138,8 +132,7 @@ def make_features(lemma_and_pos, sense, context, feature_dict, window):
         if word not in feature_dict:
             feature_dict[word] = 0
         feature_dict[word] += 1
-
-    '''
+    
     #co-location
     for index in range(window):
         #expands on both sides of word to disambiguate
@@ -160,7 +153,6 @@ def make_features(lemma_and_pos, sense, context, feature_dict, window):
             feature_dict[post_w] += 1
         except IndexError:
             continue
-    '''
 
     return feature_dict
 
@@ -190,14 +182,14 @@ def dict_max_key(d):
     given a dict, returns the KEY corresponding to the max VALUE val
     '''
     m = max(d.values())
-    k = [k for k,v in d.iteritems() if v == m]
+    k = [k for k,v in d.items() if v == m]
 
     return k[0]
 
 #classes
 class Classifier:
     @timer
-    def __init__(self, examples_as_list, window = 2):
+    def __init__(self, examples_as_list, window = 3):
         '''
         creates all classifiers from training examples in one shot
         '''
@@ -209,9 +201,6 @@ class Classifier:
 
             if current_lemma not in self.classifiers:
                 self.classifiers[current_lemma] = Word(window)
-
-            #print self.classifiers
-            #print example_as_list
 
             self.classifiers[current_lemma].add_to(*example_as_list)
 
@@ -226,9 +215,9 @@ class Classifier:
 
             lemma = example[0].split('.')[0]
 
-            results.append(self.classifiers[lemma].compare(example))
+            results.append(self.classifiers[lemma].classify(example))
 
-        return map(int, results)
+        return list(map(int, results))
 
     def __getitem__(self, key):
         #call this shit like a dictionary!
@@ -241,16 +230,19 @@ class Classifier:
 
 class Word:
     '''
-    holds information on one word to disambiguate
+    holds classifier for one word
     '''
     def __init__(self, window):
         self.senses = {}
         self.window = window
-        self.lemma = None
-        self.tally = None
+        self.lemma = None #lemmatized form of word
+        self.tally = None #unsmoothed number of times we see the word in training
         self.vocab = set()
 
     def add_to(self, lemma_and_pos, sense, context):
+        '''
+        add a training example for this word
+        '''
         
         #first call sets the lemma for the class
         if self.lemma == None:
@@ -267,46 +259,54 @@ class Word:
         self.senses[sense].add_example(lemma_and_pos, sense, context)
 
 
-    def compare(self, test_example):
+    def classify(self, test_example):
+        '''
+        given a test example:
+            get features of test example
+            add all features to all senses
+            smooth features for each sense (these are computed for every test example)
+        '''
 
         #features of test example
         a, b, c = test_example
 
-        test_f = make_features(a, b, c, {}, self.window)
+        test_f = word_features(a, b, c, {}, self.window)
 
         #add 1 smoothing
+        #get all features including the training example
         f = set()
         for sense in self.senses.values():
-            f = f | set(sense.features.keys())
-            f = f | set(test_f.keys())
+            f = f | set(sense.word_features.keys()) | set(test_f.keys())
+
+        log_probs = {}
 
         #update vocab for word, just for this 
-
+        #this way we have smoothed counts 
+        #compute conditional feature probabilities
         for sense in self.senses.values():
             sense.smooth(list(f), len(self.vocab))
-
-        #compute conditional feature probabilities
-        sense_log_prob = self.feature_prob(test_f)
+            log_probs[sense.num] = 0
+            for feature in test_f:
+                log_probs[sense.num] += log(sense.smoothed_word_features[feature]/sense.smoothed_word_count, 2)
 
         #priors
         for sense in self.senses.values():
-            sense_log_prob[sense.num] += log(sense.count/self.get_tally(), 2)
+            log_probs[sense.num] += log(sense.count/self.get_tally(), 2)
 
-        return dict_max_key(sense_log_prob)
+        return dict_max_key(log_probs)
 
-
+    '''
     def feature_prob(self, test_f):
-        log_probs = {}
 
         for sense in self.senses.values():
             log_probs[sense.num] = 0
             for feature in test_f:
                 #for now, just ignore features we haven't seen before
-                if feature in sense.features:
-                    log_probs[sense.num] += log(sense.features[feature]/sense.smoothed_count, 2)
+                if feature in sense.smoothed_word_features:
+                    log_probs[sense.num] += log(sense.smoothed_word_features[feature]/sense.smoothed_word_count, 2)
 
         return log_probs
-
+    '''
 
     def get_tally(self):
         if self.tally == None:
@@ -338,39 +338,49 @@ class Sense:
     '''
     def __init__(self, window, number):
         self.count = 0
-        self.smoothed_count = 0 #this is what we eventually normalize by
-        self.features = {}
-        self.smoothed_features = {}
+        self.smoothed_word_count = 0 #this is what we eventually normalize by
+        self.smoothed_other_count = 0
+
+        self.word_features = {} #features we can do normal laplacian smoothing
+        self.smoothed_word_features = {}
+
+        self.other_features = {} #features that have different priors than 1/V
+        self.smoothed_other_features = {} 
+
         self.window = window
         self.num = number
 
     def add_example(self, lemma_and_pos, sense, context):
         self.count += 1
 
-        self.features = make_features(lemma_and_pos, sense, context, self.features, self.window)
+        self.word_features = word_features(lemma_and_pos, sense, context, self.word_features, self.window)
 
-    def smooth(self, complete_feature_list, vocab_length):
+    def smooth(self, word_feature_list, vocab_length):
+        #this is called upon seeing a test example
+        #the idea is that we add any unseen test example features to the feature bag,
+        #   then smooth
+
         #Word class looks at all senses and returns a list of all features
         #this function adds 1 to all features, including ones we haven't seen for this sense
         #this avoids the multiplication-by-zero problem
 
         #assume we add one feature vector with all 1's
         #to prevent the possiblity of 101/100 or something bizarre
-        self.smoothed_count = self.count + len(complete_feature_list)
+        self.smoothed_word_count = self.count + len(word_feature_list)
 
-        for feature in complete_feature_list:
-            if feature not in self.features:
-                self.features[feature] = 0
-            self.features[feature] += 1
+        temp_word_f = self.word_features
+
+        for feature in word_feature_list:
+            if feature not in temp_word_f:
+                temp_word_f[feature] = 0
+            temp_word_f[feature] += 1
+
+        self.smoothed_word_features = temp_word_f
 
     #def feature_prob(self, test_features):
 
-    def __getitem__(self, key):
-        #call this shit like a dictionary!
-        return self.features[key]
-
     def __repr__(self):
-        return str(self.features)
+        return 'Sense {} instance'.format(self.num)
 
 
 #####
