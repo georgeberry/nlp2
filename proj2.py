@@ -19,7 +19,7 @@ if p = 1/V and m = V, this reduces to laplacian smoothing
 '''
 
 #imports
-from math import log
+from math import log, factorial
 import re
 from functools import wraps
 import time
@@ -57,14 +57,14 @@ def split_up(path):
 
     return contexts
 
-def get_stopwords(path):
-    '''
-        this is a pointwise mutual information approach to finding stopwords
-        we'd like to eliminate words that occur frequently and don't tell us anything
-        i.e. they don't disambiguate the senses well
-        PMI tells us how much more often we see a feature and sense together than we'd expect if they were independent
+def combination(n,k):
+    numerator=factorial(n)
+    denominator=(factorial(k)*factorial(n-k))
+    answer=numerator/denominator
+    return answer
 
-    '''
+def get_gowords(path):
+
     pass
 
 def timer(f):
@@ -117,11 +117,11 @@ def kaggle_output(filepath, output):
         f.write('Id' + ',' + 'Prediction' + ',' + '\n')
         num = 1
         for line in output:
-            f.write(num + ',' + str(line) + ',' + '\n')
+            f.write(str(num) + ',' + str(line) + ',' + '\n')
             num += 1
 
 
-def word_features(lemma_and_pos, sense, context, word_feature_dict, wordform_feature_dict, capital_feature_dict, window):
+def make_features(lemma_and_pos, sense, context, word_feature_dict, location_feature_dict, wordform_feature_dict, capital_feature_dict, nums_feature_dict, pos_feature_dict, window):
     '''
     word features happen here:
         these are defined by anything that can be smoothed by laplacian smoothing
@@ -151,19 +151,19 @@ def word_features(lemma_and_pos, sense, context, word_feature_dict, wordform_fea
     #remove stopwords
     context = list(filter(lambda x: x not in STOPWORDS, context))
 
-    #co-occurrence
+    '''#co-occurrence
     for word in context:
         if word not in word_feature_dict:
             word_feature_dict[word] = 0
-        word_feature_dict[word] += 1
+        word_feature_dict[word] += 1'''
 
-    '''c = Counter(context)
+    c = Counter(context)
 
     for k, v in c.items():
         combined = str(k) + '_' + str(v)
         if combined not in word_feature_dict:
             word_feature_dict[combined] = 0
-        word_feature_dict[combined] += 1'''
+        word_feature_dict[combined] += 1
     
     #co-location
     for index in range(window):
@@ -171,18 +171,18 @@ def word_features(lemma_and_pos, sense, context, word_feature_dict, wordform_fea
         #so we do w+1 and w-1, w+2 and w-2, etc.
         try: 
             prev_w = before[-1 - index] + '_w{}'.format(-1 - index)
-            if prev_w not in word_feature_dict:
-                word_feature_dict[prev_w] = 0
-            word_feature_dict[prev_w] += 1
+            if prev_w not in location_feature_dict:
+                location_feature_dict[prev_w] = 0
+            location_feature_dict[prev_w] += 1
         except IndexError:
             #index error handles cases where target word occurs near beginnign or end of sentence
             continue
 
         try:
             post_w = after[index] + '_w+{}'.format(index + 1)
-            if post_w not in word_feature_dict:
-                word_feature_dict[post_w] = 0
-            word_feature_dict[post_w] += 1
+            if post_w not in location_feature_dict:
+                location_feature_dict[post_w] = 0
+            location_feature_dict[post_w] += 1
         except IndexError:
             continue
 
@@ -197,7 +197,25 @@ def word_features(lemma_and_pos, sense, context, word_feature_dict, wordform_fea
         capital_feature_dict[capitals] = 0
     capital_feature_dict[capitals] += 1
 
-    return word_feature_dict, wordform_feature_dict, capital_feature_dict
+    #numbers
+    nums = 0
+    for word in context:
+        try:
+            float(word)
+            nums += 1
+        except:
+            pass
+    if nums not in nums_feature_dict:
+        nums_feature_dict[nums] = 0
+    nums_feature_dict[nums] += 1
+
+    #pos
+    pos = lemma_and_pos.split('.')[1]
+    if pos not in pos_feature_dict:
+        pos_feature_dict[pos] = 0
+    pos_feature_dict[pos] += 1
+
+    return word_feature_dict, location_feature_dict, wordform_feature_dict, capital_feature_dict, nums_feature_dict, pos_feature_dict
 
 
 def return_vocab(context):
@@ -248,6 +266,8 @@ class Classifier:
 
             self.classifiers[current_lemma].add_to(*example_as_list)
 
+
+
     @timer
     def __call__(self, example_list):
         '''
@@ -263,9 +283,12 @@ class Classifier:
 
         return list(map(int, results))
 
-    def __getitem__(self, key):
-        #call this shit like a dictionary!
-        return self.classifiers[key]
+
+    def gowords(self):
+        pass
+        #for word in self.classifiers.values():
+
+
 
     def __repr__(self):
         l = len(self.classifiers.keys())
@@ -281,6 +304,7 @@ class Word:
         self.window = window
         self.lemma = None #lemmatized form of word
         self.tally = None #unsmoothed number of times we see the word in training
+        self.max_length = 0
         self.vocab = set()
 
     def add_to(self, lemma_and_pos, sense, context):
@@ -302,6 +326,9 @@ class Word:
         
         self.senses[sense].add_example(lemma_and_pos, sense, context)
 
+        if len(context) > self.max_length:
+            self.max_length = len(context)
+
     def classify(self, test_example):
         '''
         given a test example:
@@ -313,8 +340,7 @@ class Word:
         #features of test example
         a, b, c = test_example
 
-
-        test_word_f, test_wordform_f, test_capital_f = word_features(a, b, c, {}, {}, {}, self.window)
+        test_word_f, test_location_f, test_wordform_f, test_capital_f, test_nums_f, test_pos_f = make_features(a, b, c, {}, {}, {}, {}, {}, {}, self.window)
 
         #add 1 smoothing
         #get all features including the training example
@@ -322,6 +348,11 @@ class Word:
         for sense in self.senses.values():
             word_f = word_f | set(sense.word_features.keys())
         word_f = word_f | set(test_word_f.keys())
+
+        location_f = set()
+        for sense in self.senses.values():
+            location_f = location_f | set(sense.location_features.keys())
+        location_f = location_f | set(test_location_f.keys())
 
         wordform_f = set()
         for sense in self.senses.values():
@@ -333,6 +364,23 @@ class Word:
             capital_f = capital_f | set(sense.capital_features.keys())
         capital_f = capital_f | set(test_capital_f.keys())
 
+        nums_f = set()
+        for sense in self.senses.values():
+            nums_f = nums_f | set(sense.nums_features.keys())
+        nums_f = nums_f | set(test_nums_f.keys())
+
+        pos_f = set()
+        for sense in self.senses.values():
+            pos_f = pos_f | set(sense.pos_features.keys())
+        pos_f = pos_f | set(test_pos_f.keys())     
+
+        '''
+        idea: throw out all features where std dev is less than (1/#senses)^2
+
+        '''
+
+
+
         #log prob of test example for all senses
         log_probs = {}
 
@@ -343,7 +391,11 @@ class Word:
         for sense in self.senses.values():
 
             #smooth
-            sense.smooth(list(word_f), len(self.vocab), list(wordform_f), list(capital_f))
+            sense.smooth(list(word_f), len(self.vocab), list(location_f), list(wordform_f), list(capital_f), list(nums_f), list(pos_f))
+
+            
+
+        for sense in self.senses.values():
 
             log_probs[sense.num] = 0
 
@@ -354,7 +406,10 @@ class Word:
                 #except:
                 #    pass
 
-                log_probs[sense.num] += log(sense.smoothed_word_features[feature]/(sense.smoothed_word_count + sense.count), 2)
+                log_probs[sense.num] += log((sense.smoothed_word_features[feature]/(sense.smoothed_word_count + sense.count)), 2) #/sum(range(self.max_length)), 2)
+
+            for feature in test_location_f:
+                log_probs[sense.num] += log(sense.smoothed_location_features[feature]/(sense.smoothed_location_count), 2)
 
             #wordform features
             for feature in test_wordform_f:
@@ -363,6 +418,12 @@ class Word:
             #capital features
             for feature in test_capital_f:
                 log_probs[sense.num] += log(sense.smoothed_capital_features[feature]/sense.smoothed_capital_count, 2)
+
+            for feature in test_nums_f:
+                log_probs[sense.num] += log(sense.smoothed_nums_features[feature]/sense.smoothed_nums_count, 2)
+
+            for feature in test_pos_f:
+                log_probs[sense.num] += log(sense.smoothed_pos_features[feature]/sense.smoothed_pos_count, 2)
 
         #priors
         for sense in self.senses.values():
@@ -376,6 +437,9 @@ class Word:
             for sense in self.senses.values():
                 self.tally += sense.count
         return self.tally
+
+    def gowords_helper(self):
+        pass
 
     def __getitem__(self, key):
         #call this shit like a dictionary!
@@ -402,17 +466,31 @@ class Sense:
         self.count = 0
         self.length = 0
         self.smoothed_word_count = 0 #this is what we eventually normalize by
+        self.smoothed_location_count = 0
         self.smoothed_wordform_count = 0
         self.smoothed_capital_count = 0
+        self.smoothed_nums_count = 0
+        self.smoothed_pos_count = 0
+
+        self.max_length = 0
 
         self.word_features = {} #features we can do normal laplacian smoothing
         self.smoothed_word_features = {}
+
+        self.location_features = {}
+        self.smoothed_location_features = {}
 
         self.wordform_features = {} #features that have different priors than 1/V
         self.smoothed_wordform_features = {}
 
         self.capital_features = {}
         self.smoothed_capital_features = {}
+
+        self.nums_features = {}
+        self.smoothed_nums_features = {}
+
+        self.pos_features = {}
+        self.smoothed_pos_features = {}
 
         self.window = window
         self.num = number
@@ -421,10 +499,13 @@ class Sense:
         self.count += 1
         self.length += len(context)
 
-        self.word_features, self.wordform_features, self.capital_features = word_features(lemma_and_pos, sense, context, self.word_features, self.wordform_features, self.capital_features, self.window)
+        self.word_features, self.location_features, self.wordform_features, self.capital_features, self.nums_features, self.pos_features = make_features(lemma_and_pos, sense, context, self.word_features, self.location_features, self.wordform_features, self.capital_features, self.nums_features, self.pos_features, self.window)
+
+        if len(context) > self.max_length:
+            self.max_length = len(context)
 
 
-    def smooth(self, word_feature_list, vocab_length, wordform_feature_list, capital_feature_list):
+    def smooth(self, word_feature_list, vocab_length, location_feature_list, wordform_feature_list, capital_feature_list, nums_feature_list, pos_feature_list):
         #this is called upon seeing a test example
         #the idea is that we add any unseen test example features to the feature bag,
         #   then smooth
@@ -433,18 +514,37 @@ class Sense:
         #this function adds 1 to all features, including ones we haven't seen for this sense
         #this avoids the multiplication-by-zero problem
 
-        self.smoothed_word_count = self.count + len(word_feature_list)
+        self.smoothed_word_count = self.count + vocab_length
+        self.smoothed_location_count = len(self.location_features) + len(location_feature_list)
         self.smoothed_wordform_count = len(self.wordform_features) + len(wordform_feature_list)
         self.smoothed_capital_count = len(self.capital_features) + len(capital_feature_list)
+        self.smoothed_nums_count = len(self.nums_features) + len(nums_feature_list)
+        self.smoothed_pos_count = len(self.pos_features) + len(pos_feature_list)
 
         temp_word_f = copy(self.word_features)
+        temp_location_f = copy(self.location_features)
         temp_wordform_f = copy(self.wordform_features)
         temp_capital_f = copy(self.capital_features)
+        temp_nums_f = copy(self.nums_features)
+        temp_pos_f = copy(self.pos_features)
+
+
+        lookup_table = {}
 
         for feature in word_feature_list:
             if feature not in temp_word_f:
                 temp_word_f[feature] = 0
-            temp_word_f[feature] += 1
+
+            num_obs = int(feature.split('_')[1])
+            if num_obs not in lookup_table:
+                lookup_table[num_obs] = vocab_length * combination(self.max_length, num_obs) * ((1/self.max_length)**num_obs * ((1 - (1/self.max_length))**(self.max_length - num_obs)) )
+
+            temp_word_f[feature] += lookup_table[num_obs]
+
+        for feature in location_feature_list:
+            if feature not in temp_location_f:
+                temp_location_f[feature] = 0
+            temp_location_f[feature] += 1
 
         for feature in wordform_feature_list:
             if feature not in temp_wordform_f:
@@ -456,9 +556,22 @@ class Sense:
                 temp_capital_f[feature] = 0
             temp_capital_f[feature] += 1
 
+        for feature in nums_feature_list:
+            if feature not in temp_nums_f:
+                temp_nums_f[feature] = 0
+            temp_nums_f[feature] += 1
+
+        for feature in pos_feature_list:
+            if feature not in temp_pos_f:
+                temp_pos_f[feature] = 0
+            temp_pos_f[feature] += 1
+
         self.smoothed_word_features = temp_word_f
+        self.smoothed_location_features = temp_location_f
         self.smoothed_wordform_features = temp_wordform_f
         self.smoothed_capital_features = temp_capital_f
+        self.smoothed_nums_features = temp_nums_f
+        self.smoothed_pos_features = temp_pos_f
 
     def __repr__(self):
         return 'Sense {} instance'.format(self.num)
@@ -467,11 +580,11 @@ class Sense:
 #####
 
 a = split_up(TRAINING_PATH)
-b = split_up(VALIDATION_PATH)
+b = split_up(KAGGLE_INPUT_PATH)
 c = Classifier(a)
 
 p = c(b)
-q = get_valid_senses(b)
-correct(p,q)
+#q = get_valid_senses(b)
+#correct(p,q)
 kaggle_output(KAGGLE_OUTPUT_PATH, p)
 
