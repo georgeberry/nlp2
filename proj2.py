@@ -19,7 +19,7 @@ if p = 1/V and m = V, this reduces to laplacian smoothing
 '''
 
 #imports
-from math import log, factorial
+from math import log, factorial, e
 import re
 from functools import wraps
 import time
@@ -39,8 +39,8 @@ KAGGLE_OUTPUT_PATH = '/Users/georgeberry/Google Drive/Spring 2014/CS5740/nlp2/ka
 
 KAGGLE_INPUT_PATH = '/Users/georgeberry/Google Drive/Spring 2014/CS5740/nlp2/test_data.data'
 
-THRESHOLD = 4
-RUNS = 5
+THRESHOLD = 5
+RUNS = 10
 
 #STOPWORDS = ['the', 'The', 'a', 'A', 'and', 'And', 'is', 'Is', 'are', 'Are', 'at', 'At', 'which', 'Which', 'on', 'On', 'this', 'This', 'that', 'That', 'as', 'As']
 
@@ -160,6 +160,12 @@ def make_features(lemma_and_pos, sense, context, word_feature_dict, location_fea
     else:
         context = before + after
 
+    for word_num in range(len(context)):
+        if re.match(r'[0-9]+[\!\?\.\\/]+[0-9]*' ,context[word_num]):
+            context[word_num] = re.sub(r'[0-9]+[\!\?\.\\/]+[0-9]*', '000' , context[word_num])
+        if re.match(r'[0-9]+', context[word_num]):
+            context[word_num] = re.sub(r'[0-9]+', '<num>', context[word_num])
+
     #remove stopwords
     #context = [x for x in context if x not in STOPWORDS]
 
@@ -226,10 +232,14 @@ def make_features(lemma_and_pos, sense, context, word_feature_dict, location_fea
     context2 = []
 
     for word_num in range(len(context)):
-        if context[word_num] in GOWORDS:
+        if context[word_num] in STOPWORDS[lemma_and_pos.split('.')[0]]:
+            continue
+        else:
             context2.append(context[word_num])
 
     c = Counter(context2)
+
+    #print(c)
 
     for k, v in c.items():
         combined = str(k) + '_' + str(v)
@@ -287,7 +297,6 @@ class Classifier:
                 self.classifiers[current_lemma] = Word(window)
 
             self.classifiers[current_lemma].add_to(*example_as_list)
-
 
 
     @timer
@@ -434,9 +443,9 @@ class Word:
 
             #word features
             for feature in test_word_f:
-                if feature.split('_')[0] in GOWORDS[self.lemma].keys():
-                    log_probs[sense.num] += log((sense.smoothed_word_features[feature]/(sense.smoothed_word_count)), 2)
+                log_probs[sense.num] += log((sense.smoothed_word_features[feature]/(sense.smoothed_word_count)), 2)
 
+            #location features
             for feature in test_location_f:
                 log_probs[sense.num] += log(sense.smoothed_location_features[feature]/(sense.smoothed_location_count), 2)
 
@@ -448,9 +457,11 @@ class Word:
             for feature in test_capital_f:
                 log_probs[sense.num] += log(sense.smoothed_capital_features[feature]/sense.smoothed_capital_count, 2)
 
+            #numeric features
             for feature in test_nums_f:
                 log_probs[sense.num] += log(sense.smoothed_nums_features[feature]/sense.smoothed_nums_count, 2)
 
+            #part of speech features
             #for feature in test_pos_f:
             #    log_probs[sense.num] += log(sense.smoothed_pos_features[feature]/sense.smoothed_pos_count, 2)
 
@@ -463,7 +474,7 @@ class Word:
         #print(max_odds, probable_sense)
 
         if max_odds > THRESHOLD:
-            self.senses[probable_sense].add_example(a, probable_sense, c)
+            self.add_to(a, probable_sense, c)
 
         return max_odds, probable_sense
 
@@ -516,7 +527,7 @@ class Sense:
         self.location_features = {}
         self.smoothed_location_features = {}
 
-        self.wordform_features = {} #features that have different priors than 1/V
+        self.wordform_features = {}
         self.smoothed_wordform_features = {}
 
         self.capital_features = {}
@@ -574,7 +585,7 @@ class Sense:
             num_obs = int(feature.split('_')[1])
             if num_obs not in lookup_table:
                 #this is a binomially distributed prior
-                lookup_table[num_obs] = (vocab_length - self.count) * combination(self.max_length, num_obs) * ((1/self.max_length)**num_obs * ((1 - (1/self.max_length))**(self.max_length - num_obs)) )
+                lookup_table[num_obs] = (vocab_length - self.count) * combination(self.max_length, num_obs) * ((1/vocab_length)**num_obs * ((1 - (1/vocab_length))**(self.max_length - num_obs)) )
 
             temp_word_f[feature] += lookup_table[num_obs]
 
@@ -615,10 +626,10 @@ class Sense:
 
 
 #####
-GOWORDS = mutual_information(TRAINING_PATH, .8)
+STOPWORDS = mutual_information(TRAINING_PATH, .2)
 
 a = split_up(TRAINING_PATH)
-b = split_up(KAGGLE_INPUT_PATH)
+b = split_up(VALIDATION_PATH)
 c = Classifier(a)
 
 p = c(b)

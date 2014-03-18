@@ -48,6 +48,12 @@ def min_features(lemma_and_pos, sense, context, word_feature_dict):
     else:
         context = before + after
 
+    for word_num in range(len(context)):
+        if re.match(r'[0-9]+[\!\?\.\\/]+[0-9]*' ,context[word_num]):
+            context[word_num] = re.sub(r'[0-9]+[\!\?\.\\/]+[0-9]*', '000' , context[word_num])
+        if re.match(r'[0-9]+', context[word_num]):
+            context[word_num] = re.sub(r'[0-9]+', '<num>', context[word_num])
+
     #co-occurrence
     for word in context:
         if word not in word_feature_dict:
@@ -135,7 +141,7 @@ def mutual_information(TRAINING_PATH, throw_out_share):
             mutual_information[lemma][feature] = stdev(mutual_information[lemma][feature])
 
     for word in mutual_information:
-        mutual_information[word] = OrderedDict(sorted(mutual_information[word].items(), key = lambda t: t[1], reverse=True))
+        mutual_information[word] = OrderedDict(sorted(mutual_information[word].items(), key = lambda t: t[1]))
 
         for i in range(round(throw_out_share*len(mutual_information[word]))):
             mutual_information[word].popitem()
