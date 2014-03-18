@@ -26,19 +26,23 @@ import time
 from copy import copy
 import csv
 from collections import Counter
+from stopwords import *
 
 #constants
 TRAINING_PATH = '/Users/georgeberry/Google Drive/Spring 2014/CS5740/nlp2/training_data.data'
 
 VALIDATION_PATH = '/Users/georgeberry/Google Drive/Spring 2014/CS5740/nlp2/validation_data.data'
 
-VALIDATION_PATH2 = '/Users/georgeberry/Google Drive/Spring 2014/CS5740/nlp2/validate.data'
+VALIDATION_PATH2 = '/Users/georgeberry/Google Drive/Spring 2014/CS5740/nlp2/validation_data2.data'
 
 KAGGLE_OUTPUT_PATH = '/Users/georgeberry/Google Drive/Spring 2014/CS5740/nlp2/kaggle_output.csv'
 
 KAGGLE_INPUT_PATH = '/Users/georgeberry/Google Drive/Spring 2014/CS5740/nlp2/test_data.data'
 
-STOPWORDS = ['the', 'The', 'a', 'A', 'and', 'And', 'is', 'Is', 'are', 'Are', 'at', 'At', 'which', 'Which', 'on', 'On', 'this', 'This', 'that', 'That', 'as', 'As']
+THRESHOLD = 4
+RUNS = 5
+
+#STOPWORDS = ['the', 'The', 'a', 'A', 'and', 'And', 'is', 'Is', 'are', 'Are', 'at', 'At', 'which', 'Which', 'on', 'On', 'this', 'This', 'that', 'That', 'as', 'As']
 
 #global functions
 def split_up(path):
@@ -63,9 +67,17 @@ def combination(n,k):
     answer=numerator/denominator
     return answer
 
-def get_gowords(path):
-
-    pass
+def odds(log_prob_dict):
+    l = {}
+    if len(log_prob_dict) > 1:
+        for sense, val in log_prob_dict.items():
+            l[sense] = val - log(sum([2**v for k, v in log_prob_dict.items() if k is not sense]), 2)
+        m = max(l.items(), key = lambda x: x[1])
+        #print(l, log_prob_dict)
+        return m[1], m[0]
+    else:
+        return list(log_prob_dict.values())[0], list(log_prob_dict.keys())[0]
+        
 
 def timer(f):
     '''
@@ -149,7 +161,7 @@ def make_features(lemma_and_pos, sense, context, word_feature_dict, location_fea
         context = before + after
 
     #remove stopwords
-    context = list(filter(lambda x: x not in STOPWORDS, context))
+    #context = [x for x in context if x not in STOPWORDS]
 
     '''#co-occurrence
     for word in context:
@@ -157,14 +169,6 @@ def make_features(lemma_and_pos, sense, context, word_feature_dict, location_fea
             word_feature_dict[word] = 0
         word_feature_dict[word] += 1'''
 
-    c = Counter(context)
-
-    for k, v in c.items():
-        combined = str(k) + '_' + str(v)
-        if combined not in word_feature_dict:
-            word_feature_dict[combined] = 0
-        word_feature_dict[combined] += 1
-    
     #co-location
     for index in range(window):
         #expands on both sides of word to disambiguate
@@ -200,11 +204,13 @@ def make_features(lemma_and_pos, sense, context, word_feature_dict, location_fea
     #numbers
     nums = 0
     for word in context:
-        try:
-            float(word)
+        if word in ['&', '$', '%', '-', '--']:
             nums += 1
-        except:
-            pass
+        #try:
+        #    float(word)
+        #    nums += 1
+        #except:
+        #    pass
     if nums not in nums_feature_dict:
         nums_feature_dict[nums] = 0
     nums_feature_dict[nums] += 1
@@ -214,6 +220,22 @@ def make_features(lemma_and_pos, sense, context, word_feature_dict, location_fea
     if pos not in pos_feature_dict:
         pos_feature_dict[pos] = 0
     pos_feature_dict[pos] += 1
+
+
+    #bag of words
+    context2 = []
+
+    for word_num in range(len(context)):
+        if context[word_num] in GOWORDS:
+            context2.append(context[word_num])
+
+    c = Counter(context2)
+
+    for k, v in c.items():
+        combined = str(k) + '_' + str(v)
+        if combined not in word_feature_dict:
+            word_feature_dict[combined] = 0
+        word_feature_dict[combined] += 1
 
     return word_feature_dict, location_feature_dict, wordform_feature_dict, capital_feature_dict, nums_feature_dict, pos_feature_dict
 
@@ -269,25 +291,45 @@ class Classifier:
 
 
     @timer
-    def __call__(self, example_list):
+    def __call__(self, test_list):
         '''
         this should do classification for the input word and context
         '''
-        results = []
 
-        for example in example_list:
+        results = OrderedDict()
+        
+        for test_example_num in range(len(test_list)):
+            results[test_example_num] = None
 
-            lemma = example[0].split('.')[0]
+        #run it n-1 times
+        for run in range(RUNS - 1):
+            for test_example_num in range(len(test_list)):
+                if results[test_example_num] == None:   
+                    lemma = test_list[test_example_num][0].split('.')[0]
+                    confidence, sense = self.classifiers[lemma].classify(test_list[test_example_num])
 
-            results.append(self.classifiers[lemma].classify(example))
+                    if confidence > THRESHOLD:
+                        results[test_example_num] = sense
 
-        return list(map(int, results))
+        #then run and classify no matter what
+        for test_example_num in range(len(test_list)):
+            if results[test_example_num] == None:   
+                lemma = test_list[test_example_num][0].split('.')[0]
+                confidence, sense = self.classifiers[lemma].classify(test_list[test_example_num])
+                results[test_example_num] = sense
 
 
-    def gowords(self):
-        pass
-        #for word in self.classifiers.values():
 
+
+
+        '''results = []
+
+        for test_example in test_list:
+            lemma = test_example[0].split('.')[0]
+
+            results.append(self.classifiers[lemma].classify(test_example))'''
+
+        return list(map(int, list(results.values())))
 
 
     def __repr__(self):
@@ -374,13 +416,6 @@ class Word:
             pos_f = pos_f | set(sense.pos_features.keys())
         pos_f = pos_f | set(test_pos_f.keys())     
 
-        '''
-        idea: throw out all features where std dev is less than (1/#senses)^2
-
-        '''
-
-
-
         #log prob of test example for all senses
         log_probs = {}
 
@@ -393,20 +428,14 @@ class Word:
             #smooth
             sense.smooth(list(word_f), len(self.vocab), list(location_f), list(wordform_f), list(capital_f), list(nums_f), list(pos_f))
 
-            
-
         for sense in self.senses.values():
 
             log_probs[sense.num] = 0
 
             #word features
             for feature in test_word_f:
-                #try:
-                #    print(self.lemma, sense.num, feature, sense.word_features[feature]/sense.count)
-                #except:
-                #    pass
-
-                log_probs[sense.num] += log((sense.smoothed_word_features[feature]/(sense.smoothed_word_count + sense.count)), 2) #/sum(range(self.max_length)), 2)
+                if feature.split('_')[0] in GOWORDS[self.lemma].keys():
+                    log_probs[sense.num] += log((sense.smoothed_word_features[feature]/(sense.smoothed_word_count)), 2)
 
             for feature in test_location_f:
                 log_probs[sense.num] += log(sense.smoothed_location_features[feature]/(sense.smoothed_location_count), 2)
@@ -422,14 +451,21 @@ class Word:
             for feature in test_nums_f:
                 log_probs[sense.num] += log(sense.smoothed_nums_features[feature]/sense.smoothed_nums_count, 2)
 
-            for feature in test_pos_f:
-                log_probs[sense.num] += log(sense.smoothed_pos_features[feature]/sense.smoothed_pos_count, 2)
+            #for feature in test_pos_f:
+            #    log_probs[sense.num] += log(sense.smoothed_pos_features[feature]/sense.smoothed_pos_count, 2)
 
         #priors
-        for sense in self.senses.values():
-            log_probs[sense.num] += log(sense.count/self.get_tally(), 2)
+        #for sense in self.senses.values():
+        #    log_probs[sense.num] += log(sense.count/self.get_tally(), 2)
 
-        return dict_max_key(log_probs)
+        max_odds, probable_sense = odds(log_probs)
+
+        #print(max_odds, probable_sense)
+
+        if max_odds > THRESHOLD:
+            self.senses[probable_sense].add_example(a, probable_sense, c)
+
+        return max_odds, probable_sense
 
     def get_tally(self):
         if self.tally == None:
@@ -514,7 +550,7 @@ class Sense:
         #this function adds 1 to all features, including ones we haven't seen for this sense
         #this avoids the multiplication-by-zero problem
 
-        self.smoothed_word_count = self.count + vocab_length
+        self.smoothed_word_count = vocab_length + self.count
         self.smoothed_location_count = len(self.location_features) + len(location_feature_list)
         self.smoothed_wordform_count = len(self.wordform_features) + len(wordform_feature_list)
         self.smoothed_capital_count = len(self.capital_features) + len(capital_feature_list)
@@ -537,7 +573,8 @@ class Sense:
 
             num_obs = int(feature.split('_')[1])
             if num_obs not in lookup_table:
-                lookup_table[num_obs] = vocab_length * combination(self.max_length, num_obs) * ((1/self.max_length)**num_obs * ((1 - (1/self.max_length))**(self.max_length - num_obs)) )
+                #this is a binomially distributed prior
+                lookup_table[num_obs] = (vocab_length - self.count) * combination(self.max_length, num_obs) * ((1/self.max_length)**num_obs * ((1 - (1/self.max_length))**(self.max_length - num_obs)) )
 
             temp_word_f[feature] += lookup_table[num_obs]
 
@@ -578,13 +615,15 @@ class Sense:
 
 
 #####
+GOWORDS = mutual_information(TRAINING_PATH, .8)
 
 a = split_up(TRAINING_PATH)
 b = split_up(KAGGLE_INPUT_PATH)
 c = Classifier(a)
 
 p = c(b)
-#q = get_valid_senses(b)
-#correct(p,q)
+q = get_valid_senses(b)
+correct(p,q)
+
 kaggle_output(KAGGLE_OUTPUT_PATH, p)
 
