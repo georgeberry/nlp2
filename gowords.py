@@ -1,9 +1,8 @@
+from __future__ import division
 import re
 from math import log
 from math import sqrt
 from collections import OrderedDict
-
-TRAINING_PATH = '/Users/georgeberry/Google Drive/Spring 2014/CS5740/nlp2/training_data.data'
 
 def split_up(path):
     '''
@@ -22,12 +21,22 @@ def split_up(path):
     return contexts
 
 def stdev(list_of_numbers):
-    mean = sum(list_of_numbers)/len(list_of_numbers)
+    '''mean = sum(list_of_numbers)/len(list_of_numbers)
     sos = 0
     for num in list_of_numbers:
         sos += (num - mean)**2
 
-    return sqrt(sos) #/len(list_of_numbers))
+    return sqrt(sos) #/len(list_of_numbers))'''
+    
+    if len(list_of_numbers) > 1:
+        t = []
+        for num in range(len(list_of_numbers)):
+            s = sum([list_of_numbers[x] for x in range(len(list_of_numbers)) if x != num])
+            t.append(log(list_of_numbers[num]/s, 2))
+        return max(t)
+
+    else:
+        return log(max(list_of_numbers)/max(list_of_numbers), 2)
 
 def min_features(lemma_and_pos, sense, context, word_feature_dict):
 
@@ -63,12 +72,12 @@ def min_features(lemma_and_pos, sense, context, word_feature_dict):
     return word_feature_dict, len(context)
 
 
-def mutual_information(TRAINING_PATH, throw_out_share):
+def mutual_information(VALIDATION_PATH2, throw_out_share):
 
     #really hacky, i know
     #things start about here
 
-    examples = split_up(TRAINING_PATH)
+    examples = split_up(VALIDATION_PATH2)
 
     word_dict = {}
     word_sense_count = {}
@@ -107,6 +116,7 @@ def mutual_information(TRAINING_PATH, throw_out_share):
                 word_dict[word][sense][increment_sense] += 1
 
 
+
     for word in word_avg_length:
         l = word_avg_length[word]
         word_avg_length[word] = sum(l)/len(l)
@@ -141,9 +151,12 @@ def mutual_information(TRAINING_PATH, throw_out_share):
             mutual_information[lemma][feature] = stdev(mutual_information[lemma][feature])
 
     for word in mutual_information:
-        mutual_information[word] = OrderedDict(sorted(mutual_information[word].items(), key = lambda t: t[1]))
+        mutual_information[word] = OrderedDict(sorted(mutual_information[word].items(), key = lambda t: t[1], reverse=True))
 
-        for i in range(round(throw_out_share*len(mutual_information[word]))):
+        for i in range(int(round(throw_out_share*len(mutual_information[word])))):
             mutual_information[word].popitem()
+
+        #for i in range(3):
+        #    mutual_information[word].popitem(last=False)
 
     return mutual_information

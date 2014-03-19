@@ -26,7 +26,7 @@ import time
 from copy import copy
 import csv
 from collections import Counter
-from stopwords import *
+from gowords import *
 
 #constants
 TRAINING_PATH = '/Users/georgeberry/Google Drive/Spring 2014/CS5740/nlp2/training_data.data'
@@ -39,10 +39,14 @@ KAGGLE_OUTPUT_PATH = '/Users/georgeberry/Google Drive/Spring 2014/CS5740/nlp2/ka
 
 KAGGLE_INPUT_PATH = '/Users/georgeberry/Google Drive/Spring 2014/CS5740/nlp2/test_data.data'
 
-THRESHOLD = 5
+RATE_TRAIN_PATH = '/Users/georgeberry/Google Drive/Spring 2014/CS5740/nlp2/rate_train.data'
+
+RATE_VALID_PATH = '/Users/georgeberry/Google Drive/Spring 2014/CS5740/nlp2/rate_valid.data'
+
+THRESHOLD = 15
 RUNS = 10
 
-#STOPWORDS = ['the', 'The', 'a', 'A', 'and', 'And', 'is', 'Is', 'are', 'Are', 'at', 'At', 'which', 'Which', 'on', 'On', 'this', 'This', 'that', 'That', 'as', 'As']
+#STOPWORDS2 = ['the', 'The', 'a', 'A', 'and', 'And', 'is', 'Is', 'are', 'Are', 'at', 'At', 'which', 'Which', 'on', 'On', 'this', 'This', 'that', 'That', 'as', 'As']
 
 #global functions
 def split_up(path):
@@ -167,7 +171,7 @@ def make_features(lemma_and_pos, sense, context, word_feature_dict, location_fea
             context[word_num] = re.sub(r'[0-9]+', '<num>', context[word_num])
 
     #remove stopwords
-    #context = [x for x in context if x not in STOPWORDS]
+    #context = [x for x in context if x not in STOPWORDS2]
 
     '''#co-occurrence
     for word in context:
@@ -232,14 +236,10 @@ def make_features(lemma_and_pos, sense, context, word_feature_dict, location_fea
     context2 = []
 
     for word_num in range(len(context)):
-        if context[word_num] in STOPWORDS[lemma_and_pos.split('.')[0]]:
-            continue
-        else:
+        if context[word_num] in GOWORDS[lemma_and_pos.split('.')[0]]:
             context2.append(context[word_num])
 
     c = Counter(context2)
-
-    #print(c)
 
     for k, v in c.items():
         combined = str(k) + '_' + str(v)
@@ -311,24 +311,21 @@ class Classifier:
             results[test_example_num] = None
 
         #run it n-1 times
-        for run in range(RUNS - 1):
+        '''for run in range(RUNS - 1):
             for test_example_num in range(len(test_list)):
                 if results[test_example_num] == None:   
                     lemma = test_list[test_example_num][0].split('.')[0]
                     confidence, sense = self.classifiers[lemma].classify(test_list[test_example_num])
 
                     if confidence > THRESHOLD:
-                        results[test_example_num] = sense
+                        results[test_example_num] = sense'''
 
         #then run and classify no matter what
         for test_example_num in range(len(test_list)):
-            if results[test_example_num] == None:   
+            if results[test_example_num] == None:
                 lemma = test_list[test_example_num][0].split('.')[0]
                 confidence, sense = self.classifiers[lemma].classify(test_list[test_example_num])
                 results[test_example_num] = sense
-
-
-
 
 
         '''results = []
@@ -466,8 +463,8 @@ class Word:
             #    log_probs[sense.num] += log(sense.smoothed_pos_features[feature]/sense.smoothed_pos_count, 2)
 
         #priors
-        #for sense in self.senses.values():
-        #    log_probs[sense.num] += log(sense.count/self.get_tally(), 2)
+        for sense in self.senses.values():
+            log_probs[sense.num] += log(sense.count/self.get_tally(), 2)
 
         max_odds, probable_sense = odds(log_probs)
 
@@ -520,6 +517,7 @@ class Sense:
         self.smoothed_pos_count = 0
 
         self.max_length = 0
+        self.avg_length = []
 
         self.word_features = {} #features we can do normal laplacian smoothing
         self.smoothed_word_features = {}
@@ -548,8 +546,10 @@ class Sense:
 
         self.word_features, self.location_features, self.wordform_features, self.capital_features, self.nums_features, self.pos_features = make_features(lemma_and_pos, sense, context, self.word_features, self.location_features, self.wordform_features, self.capital_features, self.nums_features, self.pos_features, self.window)
 
-        if len(context) > self.max_length:
-            self.max_length = len(context)
+        #if len(context) > self.max_length:
+        #    self.max_length = len(context)
+
+        self.avg_length.append(len(context))
 
 
     def smooth(self, word_feature_list, vocab_length, location_feature_list, wordform_feature_list, capital_feature_list, nums_feature_list, pos_feature_list):
@@ -561,7 +561,7 @@ class Sense:
         #this function adds 1 to all features, including ones we haven't seen for this sense
         #this avoids the multiplication-by-zero problem
 
-        self.smoothed_word_count = vocab_length + self.count
+        self.smoothed_word_count = vocab_length
         self.smoothed_location_count = len(self.location_features) + len(location_feature_list)
         self.smoothed_wordform_count = len(self.wordform_features) + len(wordform_feature_list)
         self.smoothed_capital_count = len(self.capital_features) + len(capital_feature_list)
@@ -585,7 +585,9 @@ class Sense:
             num_obs = int(feature.split('_')[1])
             if num_obs not in lookup_table:
                 #this is a binomially distributed prior
-                lookup_table[num_obs] = (vocab_length - self.count) * combination(self.max_length, num_obs) * ((1/vocab_length)**num_obs * ((1 - (1/vocab_length))**(self.max_length - num_obs)) )
+                avg = round(sum(self.avg_length)/len(self.avg_length))
+
+                lookup_table[num_obs] = (vocab_length - self.count) * combination(avg, num_obs) * ((1/vocab_length)**num_obs * ((1 - (1/vocab_length))**(avg - num_obs)) )
 
             temp_word_f[feature] += lookup_table[num_obs]
 
@@ -626,7 +628,7 @@ class Sense:
 
 
 #####
-STOPWORDS = mutual_information(TRAINING_PATH, .2)
+GOWORDS = mutual_information(TRAINING_PATH, .97)
 
 a = split_up(TRAINING_PATH)
 b = split_up(VALIDATION_PATH)
